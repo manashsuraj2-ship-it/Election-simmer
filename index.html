@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Election Simulator — Fixes</title>
+<style>
+  :root{--bg:#041021;--muted:#9aa4b2;--accent:#06b6d4;--danger:#ef4444;--ok:#10b981}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#041021,#071827);color:#e6eef6;padding:14px}
+  .wrap{max-width:980px;margin:0 auto}
+  header{display:flex;gap:12px;align-items:center;margin-bottom:12px}
+  h1{font-size:18px;margin:0}
+  .card{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.03);padding:12px;border-radius:8px;margin-bottom:12px}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
+  input[type="text"], input[type="number"], select{width:100%;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:inherit}
+  button{background:var(--accent);border:none;color:#042027;padding:8px 10px;border-radius:8px;cursor:pointer}
+  button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted)}
+  button.danger{background:var(--danger);color:#fff}
+  table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
+  th,td{padding:6px;border-bottom:1px dashed rgba(255,255,255,0.03);text-align:left}
+  th{color:var(--muted);font-weight:600}
+  .small{font-size:13px;padding:6px 8px}
+  .party-color{width:14px;height:14px;border-radius:4px;display:inline-block;vertical-align:middle;margin-right:6px}
+  .badge{display:inline-block;padding:4px 8px;border-radius:6px;font-weight:700;color:#042027}
+  .muted{color:var(--muted);font-size:13px}
+  .scroll{max-height:300px;overflow:auto;border-radius:6px}
+  .modal-back{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:none;align-items:center;justify-content:center;z-index:50}
+  .modal{background:#071827;padding:16px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);width:320px;color:#e6eef6}
+  .modal h3{margin:0 0 8px 0;font-size:16px}
+  @media(max-width:720px){.row{flex-direction:column}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div style="font-size:22px">🗳️</div>
+    <div>
+      <h1>Election Simulator — Manash Studio</h1>
+      <div class="muted">अब edit/delete सही काम करते हैं। शुरुआत में कोई पार्टी नहीं रहती — पहले जोड़ें।</div>
+    </div>
+  </header>
+
+  <section class="card">
+    <div class="row">
+      <div style="flex:1">
+        <label>Election Name</label>
+        <input id="ename" type="text" placeholder="e.g., State Election 2026" />
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button id="addParty" class="small">+ Party</button>
+        <button id="addSeat" class="small">+ Seat</button>
+        <button id="run" class="small">Run</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <strong>Parties (max 10)</strong>
+      <div class="muted" id="partyHint">Add parties to start</div>
+    </div>
+    <div id="parties" style="margin-top:8px"></div>
+  </section>
+
+  <section class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <strong>Seats & Gains</strong>
+      <div class="muted">Add seats after at least 2 parties exist. Enter voters and gains (0–100).</div>
+    </div>
+    <div class="scroll" style="margin-top:8px">
+      <table id="seatsTable">
+        <thead><tr><th>Seat</th><th>Voters</th><th>Gains per party (pop,road,camp,man)</th><th>Actions</th></tr></thead>
+        <tbody id="seatsBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card" id="resultsCard" style="display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <strong>Results</strong>
+      <div class="muted" id="summaryText"></div>
+    </div>
+    <div style="margin-top:8px">
+      <table id="resultsTable"><thead><tr><th>Seat</th><th>Winner</th><th>Votes (by party)</th></tr></thead><tbody id="resultsBody"></tbody></table>
+    </div>
+  </section>
+</div>
+
+<!-- Edit Party Modal -->
+<div class="modal-back" id="modalBack">
+  <div class="modal" role="dialog" aria-modal="true">
+    <h3>Edit Party</h3>
+    <div style="margin-bottom:8px">
+      <label style="font-size:12px;color:var(--muted)">Party Name</label>
+      <input id="modalPartyName" type="text" />
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:12px;color:var(--muted)">Color (hex)</label>
+      <input id="modalPartyColor" type="text" />
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button id="modalCancel" class="ghost small">Cancel</button>
+      <button id="modalSave" class="small">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* Single-file simulator with working edit/delete and empty start */
+const MAX_PARTIES = 10;
+let parties = []; // {id,name,color}
+let seats = [];   // {id,name,voters,gains:{partyId:{pop,road,camp,man}}}
+const qs = s => document.querySelector(s);
+const qsa = s => Array.from(document.querySelectorAll(s));
+const uid = () => Math.random().toString(36).slice(2,9);
+
+/* --- Render Parties --- */
+function renderParties(){
+  const wrap = qs('#parties'); wrap.innerHTML = '';
+  if(parties.length === 0){
+    qs('#partyHint').textContent = 'No parties yet — click + Party to add';
+  } else {
+    qs('#partyHint').textContent = `${parties.length} party(ies) — max ${MAX_PARTIES}`;
+  }
+  parties.forEach((p, idx)=>{
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.style.display='flex'; div.style.justifyContent='space-between'; div.style.alignItems='center';
+    div.innerHTML = `<div style="display:flex;align-items:center;gap:10px">
+      <span class="party-color" style="background:${p.color}"></span>
+      <div>
+        <div style="font-weight:700">${p.name}</div>
+        <div class="muted" style="font-size:12px">#${idx+1}</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="ghost small" data-act="edit" data-id="${p.id}">Edit</button>
+      <button class="danger small" data-act="del" data-id="${p.id}">Delete</button>
+    </div>`;
+    wrap.appendChild(div);
+  });
+  // event delegation: attach handlers to container for reliability
+  wrap.querySelectorAll('button').forEach(b=>{
+    b.onclick = e => {
+      const id = e.target.dataset.id;
+      if(e.target.dataset.act === 'edit') openEditModal(id);
+      else if(e.target.dataset.act === 'del') removeParty(id);
+    };
+  });
+  renderSeats();
+}
+
+/* --- Party actions --- */
+function addParty(){
+  if(parties.length >= MAX_PARTIES){ alert('Max '+MAX_PARTIES+' parties'); return; }
+  const name = prompt('Party name (min 1 char)');
+  if(!name) return;
+  const color = prompt('Hex color (e.g., #ff7b7b)', '#'+Math.floor(Math.random()*16777215).toString(16));
+  const p = {id:uid(), name: name.trim(), color: color || '#888'};
+  parties.push(p);
+  // init gains for existing seats
+  seats.forEach(s => s.gains[p.id] = {pop:0,road:0,camp:0,man:0});
+  renderParties();
+}
+
+function openEditModal(id){
+  const p = parties.find(x=>x.id===id); if(!p) return;
+  qs('#modalPartyName').value = p.name;
+  qs('#modalPartyColor').value = p.color;
+  qs('#modalBack').style.display = 'flex';
+  qs('#modalBack').dataset.editing = id;
+  qs('#modalPartyName').focus();
+}
+
+qs('#modalSave').onclick = () => {
+  const id = qs('#modalBack').dataset.editing;
+  const p = parties.find(x=>x.id===id); if(!p) return;
+  const name = qs('#modalPartyName').value.trim();
+  const color = qs('#modalPartyColor').value.trim() || p.color;
+  if(!name){ alert('Name required'); return; }
+  const hex = color.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i) ? color : p.color;
+  p.name = name; p.color = hex;
+  qs('#modalBack').style.display = 'none';
+  delete qs('#modalBack').dataset.editing;
+  renderParties();
+};
+qs('#modalCancel').onclick = () => { qs('#modalBack').style.display = 'none'; delete qs('#modalBack').dataset.editing; };
+
+/* Delete party */
+function removeParty(id){
+  if(!confirm('Remove party and its data?')) return;
+  const idx = parties.findIndex(x=>x.id===id);
+  if(idx>-1) parties.splice(idx,1);
+  seats.forEach(s => { if(s.gains) delete s.gains[id]; });
+  renderParties();
+}
+
+/* --- Seats --- */
+function renderSeats(){
+  const tbody = qs('#seatsBody'); tbody.innerHTML = '';
+  seats.forEach((s)=>{
+    const tr = document.createElement('tr');
+    const gainsHtml = parties.map(p=>{
+      const g = (s.gains && s.gains[p.id]) || {pop:0,road:0,camp:0,man:0};
+      return `<div style="margin-bottom:6px">
+        <div style="font-size:12px;color:var(--muted)">${p.name}</div>
+        <input data-seat="${s.id}" data-party="${p.id}" data-field="pop" type="number" min="0" max="100" value="${g.pop}" style="width:56px;margin-right:4px" />
+        <input data-seat="${s.id}" data-party="${p.id}" data-field="road" type="number" min="0" max="100" value="${g.road}" style="width:56px;margin-right:4px" />
+        <input data-seat="${s.id}" data-party="${p.id}" data-field="camp" type="number" min="0" max="100" value="${g.camp}" style="width:56px;margin-right:4px" />
+        <input data-seat="${s.id}" data-party="${p.id}" data-field="man" type="number" min="0" max="100" value="${g.man}" style="width:56px" />
+      </div>`;
+    }).join('');
+    tr.innerHTML = `<td><input data-seat-name="${s.id}" value="${s.name}" /></td>
+      <td><input data-seat-voters="${s.id}" type="number" min="1" value="${s.voters}" /></td>
+      <td>${gainsHtml}</td>
+      <td style="white-space:nowrap">
+        <button class="small" data-act="save" data-id="${s.id}">Save</button>
+        <button class="small ghost" data-act="dup" data-id="${s.id}">Dup</button>
+        <button class="small danger" data-act="del" data-id="${s.id}">Del</button>
+      </td>`;
+    tbody.appendChild(tr);
+  });
+  // bind inputs reliably
+  qsa('input[data-seat-name]').forEach(i=> i.onchange = e => {
+    const id = e.target.dataset.seatName; const s = seats.find(x=>x.id===id); if(s) s.name = e.target.value || s.name;
+  });
+  qsa('input[data-seat-voters]').forEach(i=> i.onchange = e => {
+    const id = e.target.dataset.seatVoters; const s = seats.find(x=>x.id===id); if(s) s.voters = Math.max(1, parseInt(e.target.value)||1);
+  });
+  qsa('input[data-field]').forEach(i=> i.onchange = e => {
+    const seatId = e.target.dataset.seat, pid = e.target.dataset.party, f = e.target.dataset.field;
+    const s = seats.find(x=>x.id===seatId); if(!s.gains) s.gains = {};
+    if(!s.gains[pid]) s.gains[pid] = {pop:0,road:0,camp:0,man:0};
+    s.gains[pid][f] = Math.max(0, Math.min(100, parseFloat(e.target.value)||0));
+  });
+  qsa('button[data-act]').forEach(b=> b.onclick = e => {
+    const id = e.target.dataset.id, act = e.target.dataset.act;
+    if(act==='del') deleteSeat(id);
+    if(act==='dup') duplicateSeat(id);
+    if(act==='save') alert('Saved');
+  });
+}
+
+/* Seat actions */
+function addSeat(){
+  if(parties.length < 2){ alert('Add at least 2 parties first'); return; }
+  const name = prompt('Seat name'); if(!name) return;
+  const voters = parseInt(prompt('Number of voters in this seat', '1000')) || 1000;
+  const s = {id:uid(), name: name.trim(), voters: Math.max(1, voters), gains:{}};
+  parties.forEach(p => s.gains[p.id] = {pop:0,road:0,camp:0,man:0});
+  seats.push(s); renderSeats();
+}
+function deleteSeat(id){
+  if(!confirm('Delete seat?')) return;
+  const idx = seats.findIndex(x=>x.id===id); if(idx>-1) seats.splice(idx,1); renderSeats();
+}
+function duplicateSeat(id){
+  const s = seats.find(x=>x.id===id); if(!s) return;
+  const copy = JSON.parse(JSON.stringify(s)); copy.id = uid(); copy.name = s.name + ' (copy)'; seats.push(copy); renderSeats();
+}
+
+/* Simulation */
+function runSim(){
+  if(parties.length < 2){ alert('Need at least 2 parties'); return; }
+  if(seats.length < 1){ alert('Add at least one seat'); return; }
+  const wpop = parseFloat(prompt('Popularity weight % (e.g., 40)', '40'))||0;
+  const wroad = parseFloat(prompt('Roadshow weight %', '20'))||0;
+  const wcamp = parseFloat(prompt('Campaign weight %', '25'))||0;
+  const wman = parseFloat(prompt('Manifesto weight %', '15'))||0;
+  let sum = wpop + wroad + wcamp + wman; if(sum <= 0){ alert('Weights sum must be > 0'); return; }
+  const weights = {pop: wpop/sum, road: wroad/sum, camp: wcamp/sum, man: wman/sum};
+  const results = {seats:[], totals:{}};
+  seats.forEach(seat=>{
+    const scores = {};
+    parties.forEach(p=>{
+      const g = (seat.gains && seat.gains[p.id]) || {pop:0,road:0,camp:0,man:0};
+      const F = weights.pop*(g.pop/100) + weights.road*(g.road/100) + weights.camp*(g.camp/100) + weights.man*(g.man/100);
+      scores[p.id] = Math.max(0, F);
+    });
+    const sumScores = Object.values(scores).reduce((a,b)=>a+b,0) || 1;
+    const shares = {}; Object.keys(scores).forEach(pid => shares[pid] = (scores[pid]/sumScores) * 100);
+    const votes = {}; Object.keys(shares).forEach(pid => votes[pid] = Math.round((shares[pid]/100) * seat.voters));
+    const sorted = Object.entries(votes).sort((a,b)=> b[1]-a[1]);
+    let winner = sorted[0][0];
+    if(sorted.length>1 && sorted[0][1] === sorted[1][1]){
+      const top = [sorted[0][0], sorted[1][0]];
+      const s0 = scores[top[0]] || 0, s1 = scores[top[1]] || 0;
+      if(s0 !== s1) winner = s0 > s1 ? top[0] : top[1];
+      else winner = top.sort()[0];
+    }
+    results.seats.push({seatId:seat.id, seatName:seat.name, votes, winner});
+    results.totals[winner] = (results.totals[winner]||0) + 1;
+  });
+  showResults(results);
+}
+
+function showResults(results){
+  qs('#resultsCard').style.display = 'block';
+  const tbody = qs('#resultsBody'); tbody.innerHTML = '';
+  results.seats.forEach(s=>{
+    const tr = document.createElement('tr');
+    const winner = parties.find(p=>p.id===s.winner);
+    const wname = winner ? winner.name : s.winner;
+    const badge = winner ? `<span class="badge" style="background:${winner.color}">${wname}</span>` : wname;
+    const votesStr = parties.map(p=> `${p.name}: ${ (s.votes[p.id]||0) }`).join(' | ');
+    tr.innerHTML = `<td>${s.seatName}</td><td>${badge}</td><td class="muted">${votesStr}</td>`;
+    tbody.appendChild(tr);
+  });
+  const summary = Object.entries(results.totals).map(([pid,c])=>{
+    const p = parties.find(x=>x.id===pid); return `${p? p.name : pid}: ${c} seats`;
+  }).join(' | ');
+  qs('#summaryText').textContent = summary || 'No seats won';
+}
+
+/* Bind UI */
+qs('#addParty').onclick = addParty;
+qs('#addSeat').onclick = addSeat;
+qs('#run').onclick = runSim;
+
+/* Start with empty parties (user must add) and one sample seat optional removed */
+renderParties();
+renderSeats();
+</script>
+</body>
+</html>
